@@ -100,9 +100,28 @@ go build ./cmd/kimi-responses-adapter
 ./kimi-responses-adapter
 ```
 
+Or use the published container image (multi-arch: `linux/amd64`,
+`linux/arm64`):
+
+```sh
+docker run --rm -p 8787:8787 ghcr.io/jianyun8023/kimi-responses-adapter:latest
+```
+
 The adapter is a pure protocol converter and proxy: it does not terminate
 authentication. Deploy it on a trusted network segment, not directly on the
 public internet.
+
+## Release
+
+Releases are cut by pushing a semver tag. GoReleaser (see
+[.goreleaser.yaml](.goreleaser.yaml)) then builds binaries for
+Linux/macOS/Windows (amd64 + arm64), publishes archives and checksums to
+GitHub Releases, and pushes a multi-arch image to GHCR:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## Development
 

@@ -94,8 +94,26 @@ go build ./cmd/kimi-responses-adapter
 ./kimi-responses-adapter
 ```
 
+或使用已发布的容器镜像（多架构：`linux/amd64`、`linux/arm64`）：
+
+```sh
+docker run --rm -p 8787:8787 ghcr.io/jianyun8023/kimi-responses-adapter:latest
+```
+
 本适配器是纯粹的协议转换器和代理：它不做认证终结。请部署在可信网段，
 不要直接暴露在公网。
+
+## 发布
+
+推送 semver tag 即可触发发布。GoReleaser（见
+[.goreleaser.yaml](.goreleaser.yaml)）会为 Linux/macOS/Windows
+（amd64 + arm64）构建二进制、把归档与校验和发布到 GitHub Releases，
+并向 GHCR 推送多架构镜像：
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## 开发
 
