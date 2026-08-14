@@ -1,0 +1,10 @@
+# Build context hygiene: keep buildx uploads small and deterministic.
+.git
+.github
+target
+.env
+Dockerfile
+.dockerignore
+*.md
+dist-workspace.toml
+mise.toml

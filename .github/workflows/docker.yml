@@ -30,12 +30,16 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Build cache (layers + dependency fetch) persisted across runs in the
+      # GitHub Actions cache; mode=max exports intermediate layers too.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ghcr.io/jianyun8023/kimi-responses-adapter:${{ github.ref_name }}
             ghcr.io/jianyun8023/kimi-responses-adapter:latest
