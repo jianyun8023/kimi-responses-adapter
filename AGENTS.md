@@ -63,11 +63,13 @@ and include a captured upstream SSE sample when touching `stream.rs`.
 
 ## Release
 
-Push a semver tag. `dist` (cargo-dist, see `dist-workspace.toml`) builds
-binaries + shell/PowerShell installers and publishes GitHub Releases via the
-generated `release.yml` (do not hand-edit it; change `dist-workspace.toml`
-and run `dist generate`). `.github/workflows/docker.yml` independently builds
-and pushes the multi-arch GHCR image from the multi-stage `Dockerfile`.
+`mise run release <x.y.z>` bumps `Cargo.toml`, commits, tags `v<x.y.z>` and
+pushes both (dist requires the tag to match the package version, so never
+tag by hand). `dist` (cargo-dist, see `dist-workspace.toml`) builds binaries
++ shell/PowerShell installers and publishes GitHub Releases via the generated
+`release.yml` (do not hand-edit it; change `dist-workspace.toml` and run
+`dist generate`). `.github/workflows/docker.yml` independently builds and
+pushes the multi-arch GHCR image from the multi-stage `Dockerfile`.
 
 ## Security & Configuration Tips
 

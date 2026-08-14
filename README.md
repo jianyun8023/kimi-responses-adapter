@@ -122,9 +122,13 @@ Linux/macOS (amd64 + arm64, Linux statically linked against musl) and Windows
 GitHub Releases, and a separate workflow pushes a multi-arch image to GHCR:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+mise run release 0.1.0
 ```
+
+This task bumps `version` in `Cargo.toml`, commits it, tags `v0.1.0` and
+pushes both — dist requires the tag to match the package version, so cutting
+a release by hand (`git tag` without the bump) will fail the Release
+workflow.
 
 ## Development
 

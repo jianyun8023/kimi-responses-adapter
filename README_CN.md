@@ -113,9 +113,12 @@ shell/PowerShell 安装器和校验和发布到 GitHub Releases；另有一个�
 向 GHCR 推送多架构镜像：
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+mise run release 0.1.0
 ```
+
+该任务会 bump `Cargo.toml` 中的 `version`、提交、打 `v0.1.0` tag 并一并推送
+—— dist 要求 tag 与包版本一致，手工发版（只 `git tag` 不 bump 版本）会导致
+Release 工作流失败。
 
 ## 开发
 
