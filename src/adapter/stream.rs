@@ -216,7 +216,10 @@ impl<F: FnMut(String)> StreamTranslator<F> {
     pub fn finish_eof(&mut self) {
         self.dispatch();
         if !self.done {
-            self.fail("upstream stream ended before message_stop");
+            self.fail(
+                "upstream_error",
+                "upstream stream ended before message_stop",
+            );
             return;
         }
         self.finish();
@@ -303,12 +306,16 @@ impl<F: FnMut(String)> StreamTranslator<F> {
             "message_stop" => self.finish(),
             "error" => {
                 let mut msg = "upstream error".to_string();
+                let mut code = "upstream_error";
                 if let Some(e) = &ev.error {
+                    if !e.r#type.is_empty() {
+                        code = &e.r#type;
+                    }
                     if !e.message.is_empty() {
                         msg = e.message.clone();
                     }
                 }
-                self.fail(&msg);
+                self.fail(code, &msg);
             }
             _ => {}
         }
@@ -786,7 +793,7 @@ impl<F: FnMut(String)> StreamTranslator<F> {
         self.response_id.clear(); // prevent a second terminal event
     }
 
-    fn fail(&mut self, message: &str) {
+    fn fail(&mut self, code: &str, message: &str) {
         if self.terminated {
             return;
         }
@@ -796,7 +803,7 @@ impl<F: FnMut(String)> StreamTranslator<F> {
             self.created_at = now_unix();
         }
         let mut resp = self.response_shell("failed");
-        resp["error"] = json!({"code": "upstream_error", "message": message});
+        resp["error"] = json!({"code": code, "message": message});
         resp["usage"] = usage_map(
             self.usage_in,
             self.usage_out,
@@ -1031,6 +1038,7 @@ mod tests {
         let failed = events_of_type(&events, "response.failed");
         assert_eq!(failed.len(), 1);
         let resp = &failed[0].data["response"];
+        assert_eq!(resp["error"]["code"], "overloaded_error");
         assert_eq!(resp["error"]["message"], "Overloaded");
     }
 

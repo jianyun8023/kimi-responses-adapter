@@ -60,7 +60,8 @@ nothing to configure for authentication.
 
 Not supported (by design): Chat Completions adaptation, Anthropic-facing
 protocol, Gemini, OAuth, multi-provider, users/billing. Replay of historical
-`web_search_call` items back into upstream context is skipped in v1.
+Completed `web_search_call` items are replayed into upstream context so
+agentic follow-up turns do not repeat the same server-side search.
 
 ## Configuration
 
@@ -71,7 +72,8 @@ All configuration is via environment variables:
 | `LISTEN_ADDR`              | `:8787`                                  | bind address |
 | `KIMI_BASE_URL`            | `https://api.kimi.com/coding`            | upstream base URL |
 | `KIMI_ANTHROPIC_BETA`      | (empty)                                  | optional `anthropic-beta` header upstream |
-| `KIMI_MODEL_MAP`           | `{}`                                     | JSON object mapping Responses model → Kimi model |
+| `KIMI_MODEL_MAP`           | `{"codex-auto-review":"kimi-for-coding-highspeed"}` | JSON mappings merged over the defaults; matching keys override defaults |
+| `KIMI_CLIENT_SOURCE`       | (empty)                                  | upstream User-Agent override; empty passes through the client User-Agent |
 | `KIMI_MAX_TOKENS`          | `32768`                                  | fallback `max_tokens` when neither the client nor model metadata provides one |
 | `KIMI_THINKING_BUDGETS`    | `{"low":4096,"medium":16384,"high":32768}` | effort → budget; `minimal`/`none` disables thinking |
 | `KIMI_SEARCH_STATUS_PREFIX`| `Search results for query:`              | status-text marker to suppress |

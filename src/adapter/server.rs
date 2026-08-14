@@ -21,7 +21,7 @@ use crate::adapter::config::Config;
 use crate::adapter::convert::build_anthropic_request;
 use crate::adapter::models::ModelRegistry;
 use crate::adapter::nonstream::anthropic_to_response;
-use crate::adapter::stream::{StreamTranslator, now_unix, rand_id};
+use crate::adapter::stream::StreamTranslator;
 use crate::adapter::types::{AnthropicError, AnthropicMessageObj, ResponsesRequest};
 
 pub struct AppState {
@@ -96,6 +96,7 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
     let up_body = serde_json::to_vec(&anth).expect("request serializes");
 
     let mut headers = auth_headers(&inbound);
+    apply_client_source(&state.cfg, &inbound, &mut headers);
     headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
     if !state.cfg.anthropic_beta.is_empty() {
         if let Ok(v) = HeaderValue::from_str(&state.cfg.anthropic_beta) {
@@ -112,6 +113,11 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
             HeaderValue::from_static("text/event-stream"),
         );
     }
+    let client_source = headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
 
     let url = format!("{}/v1/messages", state.cfg.kimi_base_url);
     let resp = match state
@@ -133,9 +139,25 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
     };
 
     let status = resp.status();
+    let upstream_headers = resp.headers().clone();
+    let reasoning_effort = req
+        .reasoning
+        .as_ref()
+        .map(|reasoning| reasoning.effort.as_str())
+        .filter(|effort| !effort.is_empty())
+        .unwrap_or("medium");
+    let thinking_budget = anth
+        .thinking
+        .as_ref()
+        .map(|thinking| thinking.budget_tokens)
+        .unwrap_or(0);
     info!(
         model = %req.model,
         upstream_model = %anth.model,
+        model_mapped = req.model != anth.model,
+        client_source,
+        reasoning_effort,
+        thinking_budget,
         max_tokens = anth.max_tokens,
         stream = anth.stream,
         status = %status,
@@ -144,7 +166,7 @@ async fn responses_entry(State(state): State<Arc<AppState>>, req: Request) -> Re
 
     if status != StatusCode::OK {
         let err_body = read_limited(resp, 1 << 20).await.unwrap_or_default();
-        return relay_upstream_error(req.stream, &req.model, status, &err_body);
+        return relay_upstream_error(status, &upstream_headers, &err_body);
     }
 
     if anth.stream {
@@ -237,49 +259,40 @@ fn stream_response(
         .expect("response builds")
 }
 
-fn relay_upstream_error(stream: bool, model: &str, status: StatusCode, body: &[u8]) -> Response {
+fn relay_upstream_error(status: StatusCode, headers: &HeaderMap, body: &[u8]) -> Response {
     let mut msg = String::from_utf8_lossy(body).into_owned();
+    let mut typ = if status == StatusCode::TOO_MANY_REQUESTS {
+        "rate_limit_error".to_string()
+    } else {
+        "upstream_error".to_string()
+    };
     #[derive(serde::Deserialize)]
     struct ErrorBody {
         error: Option<AnthropicError>,
     }
     if let Ok(parsed) = serde_json::from_slice::<ErrorBody>(body) {
         if let Some(e) = parsed.error {
+            if !e.r#type.is_empty() {
+                typ = e.r#type;
+            }
             if !e.message.is_empty() {
                 msg = e.message;
             }
         }
     }
-    if stream {
-        let failed = json!({
-            "id": rand_id("resp_"),
-            "object": "response",
-            "created_at": now_unix(),
-            "status": "failed",
-            "model": model,
-            "output": [],
-            "error": {"code": "upstream_error", "message": msg},
-        });
-        let payload = json!({
-            "type": "response.failed",
-            "sequence_number": 0,
-            "response": failed,
-        });
-        let frame = format!("event: response.failed\ndata: {payload}\n\n");
-        return (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, "text/event-stream"),
-                (header::CACHE_CONTROL, "no-cache"),
-            ],
-            frame,
-        )
-            .into_response();
-    }
-    json_response(
+    let mut response = json_response(
         status,
-        json!({"error": {"message": msg, "type": "upstream_error"}}),
-    )
+        json!({"error": {"message": msg, "type": typ, "code": typ}}),
+    );
+    for (name, value) in headers {
+        if name == header::RETRY_AFTER
+            || name.as_str() == "x-request-id"
+            || name.as_str().starts_with("x-ratelimit-")
+        {
+            response.headers_mut().append(name.clone(), value.clone());
+        }
+    }
+    response
 }
 
 /// Proxies any non-Responses endpoint to the Kimi upstream unchanged: same
@@ -301,6 +314,7 @@ async fn passthrough(State(state): State<Arc<AppState>>, req: Request) -> Respon
         }
     }
     copy_headers(&mut headers, &parts.headers);
+    apply_client_source(&state.cfg, &parts.headers, &mut headers);
 
     let method = parts.method.clone();
     let path_log = parts.uri.path().to_string();
@@ -349,6 +363,17 @@ fn auth_headers(inbound: &HeaderMap) -> HeaderMap {
         h.insert("x-api-key", v.clone());
     }
     h
+}
+
+fn apply_client_source(cfg: &Config, inbound: &HeaderMap, upstream: &mut HeaderMap) {
+    let value = if cfg.client_source.is_empty() {
+        inbound.get(header::USER_AGENT).cloned()
+    } else {
+        HeaderValue::from_str(&cfg.client_source).ok()
+    };
+    if let Some(value) = value {
+        upstream.insert(header::USER_AGENT, value);
+    }
 }
 
 const HOP_BY_HOP: [&str; 10] = [
@@ -676,6 +701,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn codex_auto_review_maps_to_highspeed_upstream() {
+        let (base, rec) = spawn_upstream(|_| sse_response(MINI_UPSTREAM_STREAM)).await;
+        let mut cfg = test_config();
+        cfg.kimi_base_url = base;
+        cfg.model_map.insert(
+            "codex-auto-review".to_string(),
+            "kimi-for-coding-highspeed".to_string(),
+        );
+        let app = router(cfg);
+
+        let resp = post(
+            &app,
+            "/v1/responses",
+            "k",
+            r#"{"model":"codex-auto-review","stream":true,"input":"review"}"#,
+        )
+        .await;
+        let (status, _) = body_string(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            rec.lock()
+                .unwrap()
+                .body
+                .contains(r#""model":"kimi-for-coding-highspeed""#)
+        );
+    }
+
+    #[tokio::test]
     async fn passthrough_preserves_query_string() {
         let (base, rec) = spawn_upstream(|_| Response::new(Body::from("{}"))).await;
         let app = adapter_app(&base);
@@ -691,14 +744,15 @@ mod tests {
 
     #[tokio::test]
     async fn anthropic_headers_set() {
-        let seen: Arc<Mutex<(String, String)>> =
-            Arc::new(Mutex::new((String::new(), String::new())));
+        let seen: Arc<Mutex<(String, String, String)>> =
+            Arc::new(Mutex::new((String::new(), String::new(), String::new())));
         let (base, _rec) = spawn_upstream({
             let seen = seen.clone();
             move |call: &UpstreamCall| {
                 let mut s = seen.lock().unwrap();
                 s.0 = header_str(&call.headers, "anthropic-version");
                 s.1 = header_str(&call.headers, "anthropic-beta");
+                s.2 = header_str(&call.headers, "user-agent");
                 sse_response(MINI_UPSTREAM_STREAM)
             }
         })
@@ -706,6 +760,7 @@ mod tests {
         let mut cfg = test_config();
         cfg.kimi_base_url = base;
         cfg.anthropic_beta = "interleaved-thinking-2025-05-14".to_string();
+        cfg.client_source = "configured-client/1.0".to_string();
         let app = router(cfg);
 
         let resp = post(
@@ -719,6 +774,32 @@ mod tests {
         let s = seen.lock().unwrap();
         assert_eq!(s.0, "2023-06-01");
         assert_eq!(s.1, "interleaved-thinking-2025-05-14");
+        assert_eq!(s.2, "configured-client/1.0");
+    }
+
+    #[tokio::test]
+    async fn client_source_defaults_to_inbound_user_agent() {
+        let seen = Arc::new(Mutex::new(String::new()));
+        let (base, _rec) = spawn_upstream({
+            let seen = seen.clone();
+            move |call: &UpstreamCall| {
+                *seen.lock().unwrap() = header_str(&call.headers, "user-agent");
+                sse_response(MINI_UPSTREAM_STREAM)
+            }
+        })
+        .await;
+        let app = adapter_app(&base);
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::USER_AGENT, "codex-tui/0.147.0")
+            .body(Body::from(r#"{"model":"k3","stream":true,"input":"hi"}"#))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        let _ = body_string(resp).await;
+        assert_eq!(*seen.lock().unwrap(), "codex-tui/0.147.0");
     }
 
     #[tokio::test]
@@ -792,13 +873,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upstream_error_relayed_stream() {
+    async fn upstream_rate_limit_preserves_status_type_and_headers() {
         let (base, _rec) = spawn_upstream(|_| {
             Response::builder()
-                .status(529) // Anthropic overloaded
+                .status(StatusCode::TOO_MANY_REQUESTS)
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::RETRY_AFTER, "7")
+                .header("x-request-id", "req_kimi_1")
+                .header("x-ratelimit-remaining-requests", "0")
                 .body(Body::from(
-                    r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+                    r#"{"type":"error","error":{"type":"rate_limit_error","message":"Overloaded"}}"#,
                 ))
                 .unwrap()
         })
@@ -811,21 +895,19 @@ mod tests {
             r#"{"model":"k3","stream":true,"input":"hi"}"#,
         )
         .await;
-        let (status, body) = body_string(resp).await;
-        // Stream clients always get 200 + a terminal response.failed event.
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(header_str(resp.headers(), "retry-after"), "7");
+        assert_eq!(header_str(resp.headers(), "x-request-id"), "req_kimi_1");
         assert_eq!(
-            status,
-            StatusCode::OK,
-            "stream errors should surface as SSE"
+            header_str(resp.headers(), "x-ratelimit-remaining-requests"),
+            "0"
         );
-        assert!(
-            body.contains("event: response.failed"),
-            "response.failed missing:\n{body}"
-        );
-        assert!(
-            body.contains("Overloaded"),
-            "error message missing:\n{body}"
-        );
+        let (status, body) = body_string(resp).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        let error: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(error["error"]["type"], "rate_limit_error");
+        assert_eq!(error["error"]["code"], "rate_limit_error");
+        assert_eq!(error["error"]["message"], "Overloaded");
     }
 
     #[tokio::test]

@@ -55,8 +55,8 @@ api.kimi.com/coding
 - `max_tokens` 截断 → `response.incomplete`
 
 有意不支持：Chat Completions 适配、对外 Anthropic 协议、Gemini、OAuth、
-多厂商、用户/计费。v1 暂不把历史中的 `web_search_call` item 回放到上游
-上下文。
+多厂商、用户/计费。已完成的 `web_search_call` 会回放到上游上下文，避免
+Agent 后续轮次重复执行同一次服务端搜索。
 
 ## 配置
 
@@ -67,7 +67,8 @@ api.kimi.com/coding
 | `LISTEN_ADDR`               | `:8787`                                    | 监听地址 |
 | `KIMI_BASE_URL`             | `https://api.kimi.com/coding`              | 上游 base URL |
 | `KIMI_ANTHROPIC_BETA`       | （空）                                     | 可选的上游 `anthropic-beta` 头 |
-| `KIMI_MODEL_MAP`            | `{}`                                       | JSON 对象，Responses 模型 → Kimi 模型映射 |
+| `KIMI_MODEL_MAP`            | `{"codex-auto-review":"kimi-for-coding-highspeed"}` | Responses 模型映射；环境变量在默认值上合并，同名键可覆盖默认值 |
+| `KIMI_CLIENT_SOURCE`        | （空）                                     | 覆盖上游 User-Agent；为空时透传客户端 User-Agent |
 | `KIMI_MAX_TOKENS`           | `32768`                                    | 兜底 `max_tokens`，仅当客户端和模型元数据都未提供时使用 |
 | `KIMI_THINKING_BUDGETS`     | `{"low":4096,"medium":16384,"high":32768}` | effort → budget；`minimal`/`none` 关闭 thinking |
 | `KIMI_SEARCH_STATUS_PREFIX` | `Search results for query:`                | 需要抑制的状态文本前缀 |

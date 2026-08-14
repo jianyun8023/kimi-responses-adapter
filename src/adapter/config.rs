@@ -13,6 +13,9 @@ pub struct Config {
     /// Maps incoming Responses model names to upstream Kimi models.
     /// Unmapped names are passed through unchanged.
     pub model_map: HashMap<String, String>,
+    /// Overrides the upstream User-Agent. Empty means pass through the
+    /// inbound client's User-Agent unchanged.
+    pub client_source: String,
     /// The list returned by GET /v1/models.
     pub models: Vec<String>,
     /// Default Anthropic max_tokens when the client does not specify
@@ -33,7 +36,13 @@ impl Config {
                 .trim_end_matches('/')
                 .to_string(),
             anthropic_beta: std::env::var("KIMI_ANTHROPIC_BETA").unwrap_or_default(),
-            model_map: HashMap::new(),
+            model_map: [(
+                "codex-auto-review".to_string(),
+                "kimi-for-coding-highspeed".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            client_source: std::env::var("KIMI_CLIENT_SOURCE").unwrap_or_default(),
             models: vec![
                 "k3".to_string(),
                 "k3-256k".to_string(),
@@ -52,8 +61,8 @@ impl Config {
         };
         if let Ok(v) = std::env::var("KIMI_MODEL_MAP") {
             if !v.is_empty() {
-                if let Ok(m) = serde_json::from_str(&v) {
-                    cfg.model_map = m;
+                if let Ok(m) = serde_json::from_str::<HashMap<String, String>>(&v) {
+                    cfg.model_map.extend(m);
                 }
             }
         }
@@ -110,6 +119,7 @@ mod tests {
         set_env("KIMI_BASE_URL", "https://kimi.internal/coding");
         set_env("KIMI_ANTHROPIC_BETA", "interleaved-thinking-2025-05-14");
         set_env("KIMI_MODEL_MAP", r#"{"k3":"kimi-for-coding"}"#);
+        set_env("KIMI_CLIENT_SOURCE", "my-codex/1.0");
         set_env("KIMI_MODELS", "k3,k3-256k");
         set_env("KIMI_MAX_TOKENS", "8192");
         set_env(
@@ -123,6 +133,11 @@ mod tests {
         assert_eq!(cfg.kimi_base_url, "https://kimi.internal/coding");
         assert_eq!(cfg.anthropic_beta, "interleaved-thinking-2025-05-14");
         assert_eq!(cfg.model_map.get("k3").unwrap(), "kimi-for-coding");
+        assert_eq!(
+            cfg.model_map.get("codex-auto-review").unwrap(),
+            "kimi-for-coding-highspeed"
+        );
+        assert_eq!(cfg.client_source, "my-codex/1.0");
         assert_eq!(cfg.models, vec!["k3", "k3-256k"]);
         assert_eq!(cfg.max_tokens, 8192);
         assert_eq!(cfg.thinking_budgets.get("high"), Some(&300));
@@ -164,6 +179,34 @@ mod tests {
             serde_json::from_str(r#"{"model":"k3-256k","input":"hi"}"#).unwrap();
         let out = build_anthropic_request(&cfg, &req, None).unwrap();
         assert_eq!(out.model, "kimi-for-coding-highspeed");
+        clear_env();
+    }
+
+    #[test]
+    fn codex_auto_review_maps_to_highspeed_by_default() {
+        let _g = env_lock();
+        clear_env();
+        let cfg = Config::load();
+        let req: ResponsesRequest =
+            serde_json::from_str(r#"{"model":"codex-auto-review","input":"review"}"#).unwrap();
+        let out = build_anthropic_request(&cfg, &req, None).unwrap();
+        assert_eq!(out.model, "kimi-for-coding-highspeed");
+        clear_env();
+    }
+
+    #[test]
+    fn env_model_map_can_override_default() {
+        let _g = env_lock();
+        clear_env();
+        set_env(
+            "KIMI_MODEL_MAP",
+            r#"{"codex-auto-review":"kimi-for-coding"}"#,
+        );
+        let cfg = Config::load();
+        assert_eq!(
+            cfg.model_map.get("codex-auto-review").unwrap(),
+            "kimi-for-coding"
+        );
         clear_env();
     }
 
@@ -239,7 +282,11 @@ mod tests {
         assert_eq!(cfg.listen_addr, ":8787");
         assert_eq!(cfg.kimi_base_url, "https://api.kimi.com/coding");
         assert_eq!(cfg.anthropic_beta, "");
-        assert!(cfg.model_map.is_empty());
+        assert_eq!(
+            cfg.model_map.get("codex-auto-review").unwrap(),
+            "kimi-for-coding-highspeed"
+        );
+        assert!(cfg.client_source.is_empty());
         assert_eq!(
             cfg.models,
             vec![
@@ -269,7 +316,10 @@ mod tests {
         assert_eq!(cfg.kimi_base_url, "https://api.kimi.com/coding");
         assert_eq!(cfg.max_tokens, 32768);
         assert_eq!(cfg.models.len(), 4);
-        assert!(cfg.model_map.is_empty());
+        assert_eq!(
+            cfg.model_map.get("codex-auto-review").unwrap(),
+            "kimi-for-coding-highspeed"
+        );
         clear_env();
     }
 
@@ -292,7 +342,11 @@ mod tests {
         clear_env();
         set_env("KIMI_MODEL_MAP", "{not json");
         let cfg = Config::load();
-        assert!(cfg.model_map.is_empty(), "malformed map must be ignored");
+        assert_eq!(
+            cfg.model_map.get("codex-auto-review").unwrap(),
+            "kimi-for-coding-highspeed",
+            "malformed map must leave defaults intact"
+        );
         // A subsequent valid request still converts with an unmapped model.
         let req: ResponsesRequest = serde_json::from_str(r#"{"model":"k3","input":"hi"}"#).unwrap();
         let out = build_anthropic_request(&cfg, &req, None).unwrap();

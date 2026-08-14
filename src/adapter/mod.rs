@@ -14,6 +14,7 @@ pub(crate) fn test_config() -> config::Config {
         kimi_base_url: String::new(),
         anthropic_beta: String::new(),
         model_map: Default::default(),
+        client_source: String::new(),
         models: vec![],
         max_tokens: 32768,
         thinking_budgets: [
@@ -29,11 +30,12 @@ pub(crate) fn test_config() -> config::Config {
 
 /// All environment variables Config::load reads (plus the debug tee).
 #[cfg(test)]
-pub(crate) const ENV_KEYS: [&str; 9] = [
+pub(crate) const ENV_KEYS: [&str; 10] = [
     "LISTEN_ADDR",
     "KIMI_BASE_URL",
     "KIMI_ANTHROPIC_BETA",
     "KIMI_MODEL_MAP",
+    "KIMI_CLIENT_SOURCE",
     "KIMI_MODELS",
     "KIMI_MAX_TOKENS",
     "KIMI_THINKING_BUDGETS",

@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde_json::json;
 use serde_json::value::RawValue;
 
 use crate::adapter::config::Config;
@@ -158,9 +159,7 @@ pub fn build_anthropic_request(
                     },
                 );
             }
-            // v1: server-side search history is not replayed upstream; the
-            // assistant's synthesized answer remains in the transcript.
-            "web_search_call" => {}
+            "web_search_call" => replay_web_search(&mut msgs, it),
             _ => {}
         }
     }
@@ -175,6 +174,51 @@ pub fn build_anthropic_request(
     out.tool_choice = convert_tool_choice(req.tool_choice.as_deref(), req.parallel_tool_calls);
 
     Ok(out)
+}
+
+fn replay_web_search(msgs: &mut Vec<AnthropicMessage>, item: &InputItem) {
+    if item.id.is_empty() {
+        return;
+    }
+    let action = item
+        .action
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw.get()).ok())
+        .unwrap_or_default();
+    let query = action
+        .get("query")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let input = parse_raw_json(&json!({"query": query}).to_string()).expect("query serializes");
+    let sources = action
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|source| source.get("url").and_then(serde_json::Value::as_str))
+        .map(|url| json!({"type": "web_search_result", "url": url, "title": url}))
+        .collect();
+    push_block(
+        msgs,
+        "assistant",
+        AnthropicContent {
+            r#type: "server_tool_use".to_string(),
+            id: item.id.clone(),
+            name: "web_search".to_string(),
+            input: Some(input),
+            ..Default::default()
+        },
+    );
+    push_block(
+        msgs,
+        "assistant",
+        AnthropicContent {
+            r#type: "web_search_tool_result".to_string(),
+            tool_use_id: item.id.clone(),
+            content: Some(serde_json::Value::Array(sources)),
+            ..Default::default()
+        },
+    );
 }
 
 fn push_block(msgs: &mut Vec<AnthropicMessage>, role: &str, block: AnthropicContent) {
@@ -892,26 +936,29 @@ mod tests {
     }
 
     #[test]
-    fn web_search_call_history_skipped() {
+    fn web_search_call_history_replayed() {
         let out = must_build(
             &test_config(),
             r#"{
                 "model": "k3",
                 "input": [
                     {"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
-                    {"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"x"}},
+                    {"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"x","sources":[{"type":"url","url":"https://example.com"}]}},
                     {"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}
                 ]
             }"#,
         );
-        for m in &out.messages {
-            for b in &m.content {
-                assert!(
-                    b.r#type != "server_tool_use" && b.r#type != "web_search_tool_result",
-                    "web_search_call history should be skipped in v1: {m:?}"
-                );
-            }
-        }
+        let search = &out.messages[1].content;
+        assert_eq!(search[0].r#type, "server_tool_use");
+        assert_eq!(search[0].id, "ws_1");
+        assert_eq!(search[0].name, "web_search");
+        assert_eq!(search[0].input.as_ref().unwrap().get(), r#"{"query":"x"}"#);
+        assert_eq!(search[1].r#type, "web_search_tool_result");
+        assert_eq!(search[1].tool_use_id, "ws_1");
+        assert_eq!(
+            search[1].content.as_ref().unwrap()[0]["url"],
+            "https://example.com"
+        );
     }
 
     #[test]

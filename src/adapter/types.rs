@@ -65,6 +65,8 @@ pub struct InputItem {
     /// web_search_call | ...
     #[serde(default, deserialize_with = "null_default")]
     pub r#type: String,
+    #[serde(default, deserialize_with = "null_default")]
+    pub id: String,
     /// For type=message.
     #[serde(default, deserialize_with = "null_default")]
     pub role: String,
@@ -90,6 +92,10 @@ pub struct InputItem {
     /// function_call_output: string or []ContentPart.
     #[serde(default)]
     pub output: Option<Box<RawValue>>,
+
+    // web_search_call
+    #[serde(default)]
+    pub action: Option<Box<RawValue>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -324,7 +330,6 @@ pub struct AnthropicDelta {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AnthropicError {
     #[serde(default, deserialize_with = "null_default")]
-    #[allow(dead_code)]
     pub r#type: String,
     #[serde(default, deserialize_with = "null_default")]
     pub message: String,
