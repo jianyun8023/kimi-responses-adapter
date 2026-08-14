@@ -1,0 +1,19 @@
+# Local env config (may contain per-user settings; credentials are never stored)
+.env
+.env.*
+
+# Build artifacts
+/kimi-responses-adapter
+/bin/
+/dist/
+*.out
+*.test
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Agent/tooling local state
+/.agents/
+/.codex/
