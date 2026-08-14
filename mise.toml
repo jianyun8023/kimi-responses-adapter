@@ -1,0 +1,27 @@
+[tools]
+rust = "stable"
+cargo-dist = "latest"
+
+[tasks.build]
+description = "Compile all targets"
+run = "cargo build"
+
+[tasks.test]
+description = "Run all unit + httptest-based end-to-end tests"
+run = "cargo test"
+
+[tasks.lint]
+description = "Static analysis (clippy, warnings denied)"
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks.fmt]
+description = "Format all Rust code"
+run = "cargo fmt"
+
+[tasks.run]
+description = "Serve on :8787 (LISTEN_ADDR to override)"
+run = "cargo run"
+
+[tasks.ci]
+description = "fmt check + clippy + tests (what CI runs)"
+run = ["cargo fmt --check", "cargo clippy --all-targets -- -D warnings", "cargo test"]

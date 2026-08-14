@@ -6,6 +6,7 @@
 /kimi-responses-adapter
 /bin/
 /dist/
+/target
 *.out
 *.test
 

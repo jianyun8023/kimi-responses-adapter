@@ -90,8 +90,8 @@ Anthropic 的要求丢弃采样参数（`temperature`、`top_p`）。
 ## 运行
 
 ```sh
-go build ./cmd/kimi-responses-adapter
-./kimi-responses-adapter
+cargo build --release
+./target/release/kimi-responses-adapter
 ```
 
 或使用已发布的容器镜像（多架构：`linux/amd64`、`linux/arm64`）：
@@ -105,10 +105,11 @@ docker run --rm -p 8787:8787 ghcr.io/jianyun8023/kimi-responses-adapter:latest
 
 ## 发布
 
-推送 semver tag 即可触发发布。GoReleaser（见
-[.goreleaser.yaml](.goreleaser.yaml)）会为 Linux/macOS/Windows
-（amd64 + arm64）构建二进制、把归档与校验和发布到 GitHub Releases，
-并向 GHCR 推送多架构镜像：
+推送 semver tag 即可触发发布。[dist](https://opensource.axo.dev/cargo-dist/)（见
+[dist-workspace.toml](dist-workspace.toml)）会为 Linux/macOS（amd64 + arm64，
+Linux 使用 musl 静态链接）和 Windows（amd64）构建二进制，把归档、
+shell/PowerShell 安装器和校验和发布到 GitHub Releases；另有一个独立工作流
+向 GHCR 推送多架构镜像：
 
 ```sh
 git tag v0.1.0
@@ -117,6 +118,13 @@ git push origin v0.1.0
 
 ## 开发
 
+工具链与任务由 [mise](https://mise.jdx.dev) 管理（先执行一次
+`mise install`，然后）：
+
 ```sh
-go test ./...
+mise run build   # cargo build
+mise run test    # cargo test
+mise run lint    # cargo clippy --all-targets -- -D warnings
+mise run fmt     # cargo fmt
+mise run ci      # fmt --check + clippy + test（与 CI 一致）
 ```

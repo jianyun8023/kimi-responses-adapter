@@ -14,12 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
+      - uses: jdx/mise-action@v3
 
-      - run: gofmt -l .
-      - run: go vet ./...
-      - run: go build ./...
-      - run: go test ./...
+      - run: mise run ci

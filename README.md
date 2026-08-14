@@ -96,8 +96,8 @@ metadata → `KIMI_MAX_TOKENS`. The effective value is logged per request.
 ## Run
 
 ```sh
-go build ./cmd/kimi-responses-adapter
-./kimi-responses-adapter
+cargo build --release
+./target/release/kimi-responses-adapter
 ```
 
 Or use the published container image (multi-arch: `linux/amd64`,
@@ -113,10 +113,11 @@ public internet.
 
 ## Release
 
-Releases are cut by pushing a semver tag. GoReleaser (see
-[.goreleaser.yaml](.goreleaser.yaml)) then builds binaries for
-Linux/macOS/Windows (amd64 + arm64), publishes archives and checksums to
-GitHub Releases, and pushes a multi-arch image to GHCR:
+Releases are cut by pushing a semver tag. [dist](https://opensource.axo.dev/cargo-dist/)
+(see [dist-workspace.toml](dist-workspace.toml)) then builds binaries for
+Linux/macOS (amd64 + arm64, Linux statically linked against musl) and Windows
+(amd64), publishes archives, shell/PowerShell installers and checksums to
+GitHub Releases, and a separate workflow pushes a multi-arch image to GHCR:
 
 ```sh
 git tag v0.1.0
@@ -125,6 +126,13 @@ git push origin v0.1.0
 
 ## Development
 
+Toolchain and tasks are managed by [mise](https://mise.jdx.dev)
+(`mise install` once, then):
+
 ```sh
-go test ./...
+mise run build   # cargo build
+mise run test    # cargo test
+mise run lint    # cargo clippy --all-targets -- -D warnings
+mise run fmt     # cargo fmt
+mise run ci      # fmt --check + clippy + test (what CI runs)
 ```
