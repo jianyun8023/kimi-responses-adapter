@@ -1,19 +1,31 @@
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
+/// Go's encoding/json leaves the zero value when a field is JSON null; serde
+/// rejects null for non-Option fields. Real Kimi payloads contain nulls
+/// (e.g. "stop_reason":null in message_start), so every scalar/slice field
+/// we parse must tolerate null the way Go does.
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 // OpenAI Responses API inbound types. Only the fields the adapter needs are
 // modeled; unknown fields are ignored.
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct ResponsesRequest {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub model: String,
     /// String or []InputItem.
     #[serde(default)]
     pub input: Option<Box<RawValue>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub instructions: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub tools: Vec<Box<RawValue>>,
     #[serde(default)]
     pub tool_choice: Option<Box<RawValue>>,
@@ -21,27 +33,27 @@ pub struct ResponsesRequest {
     pub parallel_tool_calls: Option<bool>,
     #[serde(default)]
     pub reasoning: Option<ResponsesReasoning>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub max_output_tokens: i64,
     #[serde(default)]
     pub temperature: Option<f64>,
     #[serde(default)]
     pub top_p: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub stream: bool,
     #[serde(default)]
     #[expect(dead_code)]
     pub store: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[expect(dead_code)]
     pub include: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct ResponsesReasoning {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub effort: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[allow(dead_code)]
     pub summary: String,
 }
@@ -51,10 +63,10 @@ pub struct ResponsesReasoning {
 pub struct InputItem {
     /// message | reasoning | function_call | function_call_output |
     /// web_search_call | ...
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub r#type: String,
     /// For type=message.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub role: String,
 
     /// String or []ContentPart.
@@ -62,17 +74,17 @@ pub struct InputItem {
     pub content: Option<Box<RawValue>>,
 
     // reasoning
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub summary: Vec<SummaryPart>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub encrypted_content: String,
 
     // function_call
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub call_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub arguments: String,
 
     /// function_call_output: string or []ContentPart.
@@ -82,19 +94,19 @@ pub struct InputItem {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct SummaryPart {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[allow(dead_code)]
     pub r#type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub text: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ContentPart {
     /// input_text | input_image | output_text | ...
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub r#type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub text: String,
     /// String or {"url": ...}.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,30 +151,38 @@ pub struct AnthropicMessage {
 /// tool_result, server_tool_use, web_search_tool_result.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AnthropicContent {
+    #[serde(default, deserialize_with = "null_default")]
     pub r#type: String,
 
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ImageSource>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub thinking: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub signature: String,
     /// redacted_thinking payload.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub data: String,
 
     /// tool_use / server_tool_use.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub id: String,
     /// tool_use / server_tool_use.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
     /// tool_use / server_tool_use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<Box<RawValue>>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub tool_use_id: String,
     /// tool_result / web_search_tool_result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,12 +192,16 @@ pub struct AnthropicContent {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ImageSource {
     /// "base64" or "url".
+    #[serde(default, deserialize_with = "null_default")]
     pub r#type: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub media_type: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub data: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, deserialize_with = "null_default")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub url: String,
 }
 
@@ -219,13 +243,13 @@ pub struct AnthropicThinking {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AnthropicUsage {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub input_tokens: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub output_tokens: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub cache_creation_input_tokens: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub cache_read_input_tokens: i64,
     #[serde(default)]
     pub output_tokens_details: Option<AnthropicOutputTokenDetails>,
@@ -233,28 +257,28 @@ pub struct AnthropicUsage {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AnthropicOutputTokenDetails {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub thinking_tokens: i64,
 }
 
 /// AnthropicMessageObj is the non-streaming response / message_start payload.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AnthropicMessageObj {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[allow(dead_code)]
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[allow(dead_code)]
     pub r#type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[allow(dead_code)]
     pub role: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub content: Vec<AnthropicContent>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[allow(dead_code)]
     pub model: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub stop_reason: String,
     #[serde(default)]
     pub usage: Option<AnthropicUsage>,
@@ -263,9 +287,9 @@ pub struct AnthropicMessageObj {
 /// AnthropicStreamEvent is the envelope for every SSE event from upstream.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AnthropicStreamEvent {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub r#type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[expect(dead_code)]
     pub index: i64,
     #[serde(default)]
@@ -283,25 +307,25 @@ pub struct AnthropicStreamEvent {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AnthropicDelta {
     /// text_delta | thinking_delta | signature_delta | input_json_delta.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub r#type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub text: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub thinking: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub signature: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub partial_json: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub stop_reason: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct AnthropicError {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     #[allow(dead_code)]
     pub r#type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub message: String,
 }

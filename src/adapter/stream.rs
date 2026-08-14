@@ -1237,6 +1237,47 @@ mod tests {
 
     // ---- negative cases ----
 
+    // Real Kimi payloads carry JSON nulls ("stop_reason":null in
+    // message_start, "stop_sequence":null in message_delta). Go's
+    // encoding/json tolerates them; the translator must too, or the
+    // message_start event fails to parse and no response.created /
+    // response.completed is ever emitted (regression test).
+    #[test]
+    fn stream_null_fields_tolerated() {
+        let upstream = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"k3-256k\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":7919,\"output_tokens\":0,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"}}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"pong\"}}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":null,\"cache_read_input_tokens\":7919,\"output_tokens\":12,\"output_tokens_details\":null}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let events = run_stream(&test_config(), upstream);
+        assert_eq!(events_of_type(&events, "response.created").len(), 1);
+        assert_eq!(events_of_type(&events, "response.in_progress").len(), 1);
+        let completed = events_of_type(&events, "response.completed");
+        assert_eq!(
+            completed.len(),
+            1,
+            "response.completed missing: null fields broke parsing"
+        );
+        let resp = &completed[0].data["response"];
+        assert_eq!(resp["status"], "completed");
+        assert_eq!(resp["usage"]["input_tokens"], 7919);
+        assert_eq!(resp["usage"]["output_tokens"], 12);
+        let mut text = String::new();
+        for e in events_of_type(&events, "response.output_text.delta") {
+            text.push_str(e.data["delta"].as_str().unwrap());
+        }
+        assert_eq!(text, "pong");
+    }
+
     #[test]
     fn stream_malformed_data_line_skipped() {
         let upstream = concat!(
