@@ -17,9 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -33,7 +30,7 @@ jobs:
       # Build cache (layers + dependency fetch) persisted across runs in the
       # GitHub Actions cache; mode=max exports intermediate layers too.
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
