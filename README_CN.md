@@ -28,9 +28,10 @@ api.kimi.com/coding
   `output_text`。
 - **函数调用**：`function_call` / `function_call_output` ↔ `tool_use` /
   `tool_result`，包含增量式的 `function_call_arguments.delta`。
-- **其余接口原样透传**：任何非 Responses 路径（`/v1/messages`、
-  `/v1/chat/completions`、`/v1/models` 等）字节级转发到 Kimi 上游，
-  包括流式响应。
+- **Codex 模型目录**：Codex 发出的 `/v1/models?client_version=...` 会转换为
+  Codex 专用模型元数据；普通 `/v1/models` 请求仍原样透传。
+- **其余接口原样透传**：其他非 Responses 路径（`/v1/messages`、
+  `/v1/chat/completions` 等）字节级转发到 Kimi 上游，包括流式响应。
 
 适配器不保存任何状态、不持有任何凭证：会话历史随每次请求到达并被确定性地
 重建为 Anthropic messages；客户端的 API key（`Authorization: Bearer ...` 或
@@ -41,6 +42,7 @@ api.kimi.com/coding
 | 端点                  | 行为                                  |
 | --------------------- | ------------------------------------- |
 | `POST /v1/responses`  | Responses ↔ Anthropic 协议适配        |
+| `GET /v1/models?client_version=...` | Codex 模型元数据适配 |
 | `GET /healthz`        | 健康检查                              |
 | 其余所有路径          | 原样透传到 Kimi 上游                  |
 

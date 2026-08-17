@@ -40,11 +40,88 @@ pub fn router(cfg: Config) -> Router {
     });
     Router::new()
         .route("/v1/responses", any(responses_entry))
+        .route("/v1/models", any(models_entry))
         .route("/healthz", any(healthz_entry))
-        // Everything else (e.g. /v1/messages, /v1/chat/completions,
-        // /v1/models) is proxied to the Kimi upstream byte-for-byte.
+        // Everything else (e.g. /v1/messages, /v1/chat/completions) is
+        // proxied to the Kimi upstream byte-for-byte.
         .fallback(passthrough)
         .with_state(state)
+}
+
+async fn models_entry(State(state): State<Arc<AppState>>, req: Request) -> Response {
+    if req.method() != Method::GET
+        || !req.uri().query().is_some_and(|query| {
+            query
+                .split('&')
+                .any(|part| part.split('=').next() == Some("client_version"))
+        })
+    {
+        return passthrough(State(state), req).await;
+    }
+
+    state
+        .models
+        .ensure_fresh(&state.cfg.kimi_base_url, &auth_headers(req.headers()))
+        .await;
+
+    let mut effort_names = state.cfg.thinking_budgets.keys().collect::<Vec<_>>();
+    effort_names.sort();
+    let efforts = effort_names
+        .into_iter()
+        .map(|effort| {
+            json!({
+                "effort": effort,
+                "description": format!("Kimi {effort} reasoning"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let models = state
+        .cfg
+        .models
+        .iter()
+        .enumerate()
+        .map(|(priority, model)| {
+            let context_window = state
+                .models
+                .lookup(model)
+                .map(|info| info.context_window)
+                .filter(|window| *window > 0)
+                .unwrap_or(262_144);
+            json!({
+                "slug": model,
+                "display_name": model,
+                "description": "Kimi Code via the OpenAI Responses adapter",
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": efforts,
+                "shell_type": "shell_command",
+                "visibility": "list",
+                "supported_in_api": true,
+                "priority": priority,
+                "availability_nux": null,
+                "upgrade": null,
+                "include_skills_usage_instructions": false,
+                "include_plugin_usage_instructions": false,
+                "include_apps_usage_instructions": false,
+                "supports_reasoning_summary_parameter": true,
+                "default_reasoning_summary": "auto",
+                "support_verbosity": false,
+                "default_verbosity": null,
+                "apply_patch_tool_type": null,
+                "web_search_tool_type": "text",
+                "truncation_policy": {"mode": "bytes", "limit": 10_000},
+                "supports_parallel_tool_calls": true,
+                "supports_image_detail_original": false,
+                "context_window": context_window,
+                "max_context_window": context_window,
+                "experimental_supported_tools": [],
+                "input_modalities": ["text", "image"],
+                "supports_search_tool": false,
+                "use_responses_lite": false,
+                "base_instructions": "You are Codex, a coding agent. Work with the user in the current workspace and use the provided tools to complete their request.",
+            })
+        })
+        .collect::<Vec<_>>();
+    json_response(StatusCode::OK, json!({"models": models}))
 }
 
 async fn healthz_entry(State(state): State<Arc<AppState>>, req: Request) -> Response {
@@ -740,6 +817,41 @@ mod tests {
         let resp = app.clone().oneshot(req).await.unwrap();
         let _ = body_string(resp).await;
         assert_eq!(rec.lock().unwrap().path, "/v1/models?limit=5&after=x");
+    }
+
+    #[tokio::test]
+    async fn codex_models_metadata_translates_upstream_catalog() {
+        let (base, rec) = spawn_upstream(|call: &UpstreamCall| {
+            assert_eq!(call.path, "/v1/models");
+            Response::new(Body::from(
+                r#"{"data":[{"id":"k3","context_length":1048576}]}"#,
+            ))
+        })
+        .await;
+        let mut cfg = test_config();
+        cfg.kimi_base_url = base;
+        cfg.models = vec!["k3".to_string()];
+        let app = router(cfg);
+        let req = Request::builder()
+            .uri("/v1/models?client_version=0.147.0")
+            .header(header::AUTHORIZATION, "Bearer client-kimi-key")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        let (status, body) = body_string(resp).await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        let out: Value = serde_json::from_str(&body).unwrap();
+        let models = out["models"].as_array().expect("Codex models array");
+        let k3 = models
+            .iter()
+            .find(|model| model["slug"] == "k3")
+            .expect("k3 model");
+        assert_eq!(k3["context_window"], 1_048_576);
+        assert_eq!(k3["shell_type"], "shell_command");
+        assert_eq!(k3["default_reasoning_level"], "medium");
+        assert!(k3["base_instructions"].as_str().is_some());
+        assert_eq!(rec.lock().unwrap().auth, "Bearer client-kimi-key");
     }
 
     #[tokio::test]

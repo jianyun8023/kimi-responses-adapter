@@ -30,9 +30,12 @@ bridge:
   leaking into `output_text`.
 - **Function calls**: `function_call` / `function_call_output` ↔ `tool_use` /
   `tool_result`, including incremental `function_call_arguments.delta`.
-- **Everything else is proxied unchanged**: any non-Responses path
-  (`/v1/messages`, `/v1/chat/completions`, `/v1/models`, ...) is forwarded to
-  the Kimi upstream byte-for-byte, including streaming.
+- **Codex model catalog**: `/v1/models?client_version=...` requests from Codex
+  are translated into Codex-specific model metadata; ordinary `/v1/models`
+  requests remain raw passthroughs.
+- **Everything else is proxied unchanged**: other non-Responses paths
+  (`/v1/messages`, `/v1/chat/completions`, ...) are forwarded to the Kimi
+  upstream byte-for-byte, including streaming.
 
 The adapter keeps no state and holds no credentials: conversation history
 arrives with every request and is deterministically rebuilt into Anthropic
@@ -45,6 +48,7 @@ nothing to configure for authentication.
 | Endpoint            | Behavior                                    |
 | ------------------- | ------------------------------------------- |
 | `POST /v1/responses` | Responses ↔ Anthropic protocol adaptation  |
+| `GET /v1/models?client_version=...` | Codex model metadata adaptation |
 | `GET /healthz`       | health check                               |
 | any other path       | raw passthrough to the Kimi upstream       |
 
